@@ -45,11 +45,11 @@ def get_collate_function(model_name, n_frames_per_step):
     return collate_fn
 
 
-def get_data_loader(model_name, dataset_path, audiopaths_and_text, args):
+def get_data_loader(model_name, audiopaths_and_text, args):
     if model_name == 'Tacotron2':
-        data_loader = TextMelLoader(dataset_path, audiopaths_and_text, args)
+        data_loader = TextMelLoader(audiopaths_and_text, args)
     elif model_name == 'WaveGlow':
-        data_loader = MelAudioLoader(dataset_path, audiopaths_and_text, args)
+        data_loader = MelAudioLoader(audiopaths_and_text, args)
     else:
         raise NotImplementedError(
             "unknown data loader requested: {}".format(model_name))

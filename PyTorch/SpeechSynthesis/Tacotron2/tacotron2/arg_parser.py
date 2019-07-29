@@ -60,6 +60,13 @@ def parse_tacotron2_args(parent, add_help=False):
     encoder.add_argument('--encoder-embedding-dim', default=512, type=int,
                          help='Encoder embedding dimension')
 
+    # speaker parameters
+    speakers = parser.add_argument_group('speakers parameters')
+    speakers.add_argument('--n-speakers', default=128, type=int,
+                          help='Number of speakers')
+    speakers.add_argument('--speaker-embedding-dim', default=512, type=int,
+                         help='Speaker embedding dimension')
+
     # decoder parameters
     decoder = parser.add_argument_group('decoder parameters')
     decoder.add_argument('--n-frames-per-step', default=1,

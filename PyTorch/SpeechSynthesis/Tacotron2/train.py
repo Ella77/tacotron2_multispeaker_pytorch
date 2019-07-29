@@ -63,8 +63,6 @@ def parse_args(parser):
 
     parser.add_argument('-o', '--output_directory', type=str, required=True,
                         help='Directory to save checkpoints')
-    parser.add_argument('-d', '--dataset-path', type=str,
-                        default='./', help='Path to dataset')
     parser.add_argument('-m', '--model-name', type=str, default='', required=True,
                         help='Model to train')
     parser.add_argument('--log-file', type=str, default='nvlog.json',
@@ -79,12 +77,16 @@ def parse_args(parser):
                         help='Epochs after which decrease learning rate')
     parser.add_argument('--anneal-factor', type=float, choices=[0.1, 0.3], default=0.1,
                         help='Factor for annealing learning rate')
+    parser.add_argument('--restore-from', type=str, default=None,
+                        help='Checkpoint path to restore from')
+    parser.add_argument('--warm-start', action='store_true',
+                        help='load model weights only, ignore specified layers')
 
     # training
     training = parser.add_argument_group('training setup')
     training.add_argument('--epochs', type=int, required=True,
                           help='Number of total epochs to run')
-    training.add_argument('--epochs-per-checkpoint', type=int, default=50,
+    training.add_argument('--epochs-per-checkpoint', type=int, default=20,
                           help='Number of epochs per checkpoint')
     training.add_argument('--seed', type=int, default=1234,
                           help='Seed for PyTorch random number generators')
@@ -96,6 +98,7 @@ def parse_args(parser):
                           help='Enable cudnn')
     training.add_argument('--cudnn-benchmark', action='store_true',
                           help='Run cudnn benchmark')
+
 
     optimization = parser.add_argument_group('optimization setup')
     optimization.add_argument(
@@ -181,12 +184,13 @@ def init_distributed(args, world_size, rank, group_name):
     print("Done initializing distributed")
 
 
-def save_checkpoint(model, epoch, config, filepath):
+def save_checkpoint(model, epoch, config, optimizer, filepath):
     print("Saving model and optimizer state at epoch {} to {}".format(
         epoch, filepath))
     torch.save({'epoch': epoch,
                 'config': config,
-                'state_dict': model.state_dict()}, filepath)
+                'state_dict': model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict()}, filepath)
 
 
 def save_sample(model_name, model, waveglow_path, tacotron2_path, phrase_path, filepath, sampling_rate):
@@ -323,6 +327,10 @@ def main():
 
     log_hardware()
 
+    # Restore training from checkpoint logic
+    checkpoint = None
+    start_epoch = 0
+
     model_name = args.model_name
     parser = models.parse_model_args(model_name, parser)
     parser.parse_args()
@@ -341,15 +349,48 @@ def main():
     LOGGER.log(key=tags.RUN_START)
     run_start_time = time.time()
 
-    model_config = models.get_model_config(model_name, args)
-    model = models.get_model(model_name, model_config,
-                             to_cuda=True)
+    # Restore training from checkpoint logic
+    if args.restore_from:
+        print('Restoring from {} checkpoint'.format(args.restore_from))
+        checkpoint = torch.load(args.restore_from, map_location='cpu')
+        start_epoch = checkpoint['epoch'] + 1
+        model_config = checkpoint['config']
+        model = models.get_model(model_name, model_config, to_cuda=True)
+
+        new_state_dict = {}
+        for key, value in checkpoint['state_dict'].items():
+            new_key = key.replace('module.', '')
+            new_state_dict[new_key] = value
+
+
+        model_dict = new_state_dict
+        if args.warm_start:
+            ignore_layers = ['embedding.weight']
+            print('Warm start')
+
+            if len(ignore_layers) > 0:
+                model_dict = {k: v for k, v in model_dict.items()
+                              if k not in ignore_layers}
+                dummy_dict = model.state_dict()
+                dummy_dict.update(model_dict)
+                model_dict = dummy_dict
+
+        model.load_state_dict(model_dict)
+    else:
+        model_config = models.get_model_config(model_name, args)
+        model = models.get_model(model_name, model_config, to_cuda=True)
+
 
     if not args.amp_run and distributed_run:
         model = DDP(model)
 
+
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate,
                                  weight_decay=args.weight_decay)
+
+    # Restore training from checkpoint logic
+    if checkpoint and 'optimizer_state_dict' in checkpoint and not args.warm_start: # TODO: think about this more
+        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
     if args.amp_run:
         model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
@@ -371,7 +412,7 @@ def main():
     collate_fn = data_functions.get_collate_function(
         model_name, n_frames_per_step)
     trainset = data_functions.get_data_loader(
-        model_name, args.dataset_path, args.training_files, args)
+        model_name, args.training_files, args)
     train_sampler = DistributedSampler(trainset) if distributed_run else None
     train_loader = DataLoader(trainset, num_workers=1, shuffle=False,
                               sampler=train_sampler,
@@ -379,7 +420,7 @@ def main():
                               drop_last=True, collate_fn=collate_fn)
 
     valset = data_functions.get_data_loader(
-        model_name, args.dataset_path, args.validation_files, args)
+        model_name, args.validation_files, args)
 
     batch_to_gpu = data_functions.get_batch_to_gpu(model_name)
 
@@ -388,110 +429,115 @@ def main():
 
     LOGGER.log(key=tags.TRAIN_LOOP)
 
-    for epoch in range(args.epochs):
-        LOGGER.epoch_start()
-        epoch_start_time = time.time()
-        LOGGER.log(key=tags.TRAIN_EPOCH_START, value=epoch)
 
-        # used to calculate avg items/sec over epoch
-        reduced_num_items_epoch = 0
+    # Restore training from checkpoint logic
+    if start_epoch >= args.epochs:
+        print('Checkpoint epoch {} >= total epochs {}'.format(start_epoch, args.epochs))
+    else:
+        for epoch in range(start_epoch, args.epochs):
+            LOGGER.epoch_start()
+            epoch_start_time = time.time()
+            LOGGER.log(key=tags.TRAIN_EPOCH_START, value=epoch)
 
-        # used to calculate avg loss over epoch
-        train_epoch_avg_loss = 0.0
-        train_epoch_avg_items_per_sec = 0.0
-        num_iters = 0
+            # used to calculate avg items/sec over epoch
+            reduced_num_items_epoch = 0
 
-        # if overflow at the last iteration then do not save checkpoint
-        overflow = False
+            # used to calculate avg loss over epoch
+            train_epoch_avg_loss = 0.0
+            train_epoch_avg_items_per_sec = 0.0
+            num_iters = 0
 
-        for i, batch in enumerate(train_loader):
-            print("Batch: {}/{} epoch {}".format(i, len(train_loader), epoch))
-            LOGGER.iteration_start()
-            iter_start_time = time.time()
-            LOGGER.log(key=tags.TRAIN_ITER_START, value=i)
+            # if overflow at the last iteration then do not save checkpoint
+            overflow = False
 
-            start = time.perf_counter()
-            adjust_learning_rate(epoch, optimizer, args.learning_rate,
-                                 args.anneal_steps, args.anneal_factor)
+            for i, batch in enumerate(train_loader):
+                print("Batch: {}/{} epoch {}".format(i, len(train_loader), epoch))
+                LOGGER.iteration_start()
+                iter_start_time = time.time()
+                LOGGER.log(key=tags.TRAIN_ITER_START, value=i)
 
-            model.zero_grad()
-            x, y, num_items = batch_to_gpu(batch)
+                start = time.perf_counter()
+                adjust_learning_rate(epoch, optimizer, args.learning_rate,
+                                     args.anneal_steps, args.anneal_factor)
 
-            y_pred = model(x)
-            loss = criterion(y_pred, y)
+                model.zero_grad()
+                x, y, num_items = batch_to_gpu(batch)
 
-            if distributed_run:
-                reduced_loss = reduce_tensor(loss.data, args.world_size).item()
-                reduced_num_items = reduce_tensor(num_items.data, 1).item()
-            else:
-                reduced_loss = loss.item()
-                reduced_num_items = num_items.item()
-            if np.isnan(reduced_loss):
-                raise Exception("loss is NaN")
+                y_pred = model(x)
+                loss = criterion(y_pred, y)
 
-            LOGGER.log(key=tags.TRAIN_ITERATION_LOSS, value=reduced_loss)
+                if distributed_run:
+                    reduced_loss = reduce_tensor(loss.data, args.world_size).item()
+                    reduced_num_items = reduce_tensor(num_items.data, 1).item()
+                else:
+                    reduced_loss = loss.item()
+                    reduced_num_items = num_items.item()
+                if np.isnan(reduced_loss):
+                    raise Exception("loss is NaN")
 
-            train_epoch_avg_loss += reduced_loss
-            num_iters += 1
+                LOGGER.log(key=tags.TRAIN_ITERATION_LOSS, value=reduced_loss)
 
-            # accumulate number of items processed in this epoch
-            reduced_num_items_epoch += reduced_num_items
+                train_epoch_avg_loss += reduced_loss
+                num_iters += 1
 
-            if args.amp_run:
-                with amp.scale_loss(loss, optimizer) as scaled_loss:
-                    scaled_loss.backward()
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    amp.master_params(optimizer), args.grad_clip_thresh)
-            else:
-                loss.backward()
-                grad_norm = torch.nn.utils.clip_grad_norm_(
-                    model.parameters(), args.grad_clip_thresh)
+                # accumulate number of items processed in this epoch
+                reduced_num_items_epoch += reduced_num_items
 
-            optimizer.step()
+                if args.amp_run:
+                    with amp.scale_loss(loss, optimizer) as scaled_loss:
+                        scaled_loss.backward()
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        amp.master_params(optimizer), args.grad_clip_thresh)
+                else:
+                    loss.backward()
+                    grad_norm = torch.nn.utils.clip_grad_norm_(
+                        model.parameters(), args.grad_clip_thresh)
 
-            iteration += 1
+                optimizer.step()
 
-            LOGGER.log(key=tags.TRAIN_ITER_STOP, value=i)
+                iteration += 1
 
-            iter_stop_time = time.time()
-            iter_time = iter_stop_time - iter_start_time
-            items_per_sec = reduced_num_items/iter_time
-            train_epoch_avg_items_per_sec += items_per_sec
+                LOGGER.log(key=tags.TRAIN_ITER_STOP, value=i)
 
-            LOGGER.log(key="train_iter_items/sec",
-                       value=items_per_sec)
-            LOGGER.log(key="iter_time", value=iter_time)
-            LOGGER.iteration_stop()
+                iter_stop_time = time.time()
+                iter_time = iter_stop_time - iter_start_time
+                items_per_sec = reduced_num_items/iter_time
+                train_epoch_avg_items_per_sec += items_per_sec
 
-        LOGGER.log(key=tags.TRAIN_EPOCH_STOP, value=epoch)
-        epoch_stop_time = time.time()
-        epoch_time = epoch_stop_time - epoch_start_time
+                LOGGER.log(key="train_iter_items/sec",
+                           value=items_per_sec)
+                LOGGER.log(key="iter_time", value=iter_time)
+                LOGGER.iteration_stop()
 
-        LOGGER.log(key="train_epoch_items/sec",
-                   value=(reduced_num_items_epoch/epoch_time))
-        LOGGER.log(key="train_epoch_avg_items/sec",
-                   value=(train_epoch_avg_items_per_sec/num_iters if num_iters > 0 else 0.0))
-        LOGGER.log(key="train_epoch_avg_loss", value=(
-            train_epoch_avg_loss/num_iters if num_iters > 0 else 0.0))
-        LOGGER.log(key="epoch_time", value=epoch_time)
+            LOGGER.log(key=tags.TRAIN_EPOCH_STOP, value=epoch)
+            epoch_stop_time = time.time()
+            epoch_time = epoch_stop_time - epoch_start_time
 
-        LOGGER.log(key=tags.EVAL_START, value=epoch)
+            LOGGER.log(key="train_epoch_items/sec",
+                       value=(reduced_num_items_epoch/epoch_time))
+            LOGGER.log(key="train_epoch_avg_items/sec",
+                       value=(train_epoch_avg_items_per_sec/num_iters if num_iters > 0 else 0.0))
+            LOGGER.log(key="train_epoch_avg_loss", value=(
+                train_epoch_avg_loss/num_iters if num_iters > 0 else 0.0))
+            LOGGER.log(key="epoch_time", value=epoch_time)
 
-        validate(model, criterion, valset, iteration,
-                 args.batch_size, args.world_size, collate_fn,
-                 distributed_run, args.rank, batch_to_gpu)
+            LOGGER.log(key=tags.EVAL_START, value=epoch)
 
-        LOGGER.log(key=tags.EVAL_STOP, value=epoch)
+            validate(model, criterion, valset, iteration,
+                     args.batch_size, args.world_size, collate_fn,
+                     distributed_run, args.rank, batch_to_gpu)
 
-        if (epoch % args.epochs_per_checkpoint == 0) and args.rank == 0:
-            checkpoint_path = os.path.join(
-                args.output_directory, "checkpoint_{}_{}".format(model_name, epoch))
-            save_checkpoint(model, epoch, model_config, checkpoint_path)
-            save_sample(model_name, model, args.waveglow_checkpoint,
-                        args.tacotron2_checkpoint, args.phrase_path,
-                        os.path.join(args.output_directory, "sample_{}_{}.wav".format(model_name, iteration)), args.sampling_rate)
+            LOGGER.log(key=tags.EVAL_STOP, value=epoch)
 
-        LOGGER.epoch_stop()
+            if (epoch % args.epochs_per_checkpoint == 0) and args.rank == 0:
+                checkpoint_path = os.path.join(
+                    args.output_directory, "checkpoint_{}_{}".format(model_name, epoch))
+                save_checkpoint(model, epoch, model_config, optimizer, checkpoint_path)
+                save_sample(model_name, model, args.waveglow_checkpoint,
+                            args.tacotron2_checkpoint, args.phrase_path,
+                            os.path.join(args.output_directory, "sample_{}_{}.wav".format(model_name, iteration)), args.sampling_rate)
+
+            LOGGER.epoch_stop()
 
     run_stop_time = time.time()
     run_time = run_stop_time - run_start_time

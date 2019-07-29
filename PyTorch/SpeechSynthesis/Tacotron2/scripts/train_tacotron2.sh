@@ -1,2 +1,6 @@
 mkdir -p output
 python -m multiproc train.py -m Tacotron2 -o ./output/ -lr 1e-3 --epochs 1501 -bs 128 --weight-decay 1e-6 --grad-clip-thresh 1.0 --cudnn-enabled --log-file ./output/nvlog.json --anneal-steps 500 1000 1500 --anneal-factor 0.1 --amp-run
+# python train.py -m Tacotron2 -o /workspace/data/LJ/output -lr 1e-3 --epochs 10 -bs 64 --weight-decay 1e-6 --grad-clip-thresh 1.0 --cudnn-enabled --log-file /workspace/data/LJ/output/nvlog.json --training-files filelists/ljs_audio_text_train_subset_1250_filelist.txt --anneal-steps 500 1000 1500 --anneal-factor 0.1
+# python -m multiproc train.py -m Tacotron2 -o /workspace/data/LJ/output -lr 1e-3 --epochs 10 -bs 64 --weight-decay 1e-6 --grad-clip-thresh 1.0 --cudnn-enabled --log-file /workspace/data/LJ/output/nvlog.json --training-files filelists/ljs_audio_text_train_filelist.txt --anneal-steps 500 1000 1500 --anneal-factor 0.1
+
+# python -m multiproc train.py -m Tacotron2 -o /workspace/data/aws/dataset/samantha/output -lr 1e-3 --epochs 2001 -bs 8 --weight-decay 1e-6 --grad-clip-thresh 1.0 --cudnn-enabled --log-file /workspace/data/aws/dataset/samantha/output/nvlog.json --training-files /workspace/data/aws/dataset/samantha/filenames/sm_audio_text_train_filelist.txt --anneal-steps 1600 1800 2000 --anneal-factor 0.1 --restore-from /workspace/output/pretrained/JoC_Tacotron2_FP32_PyT_20190306 --warm-start

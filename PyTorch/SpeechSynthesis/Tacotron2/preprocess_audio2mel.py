@@ -8,8 +8,6 @@ def parse_args(parser):
     """
     Parse commandline arguments.
     """
-    parser.add_argument('-d', '--dataset-path', type=str,
-                        default='./', help='Path to dataset')
     parser.add_argument('--wav-files', required=True,
                         type=str, help='Path to filelist with audio paths and text')
     parser.add_argument('--mel-files', required=True,
@@ -37,12 +35,12 @@ def parse_args(parser):
     return parser
 
 
-def audio2mel(dataset_path, audiopaths_and_text, melpaths_and_text, args):
+def audio2mel(audiopaths_and_text, melpaths_and_text, args):
 
-    melpaths_and_text_list = load_filepaths_and_text(dataset_path, melpaths_and_text)
-    audiopaths_and_text_list = load_filepaths_and_text(dataset_path, audiopaths_and_text)
+    melpaths_and_text_list = load_filepaths_and_text(melpaths_and_text)
+    audiopaths_and_text_list = load_filepaths_and_text(audiopaths_and_text)
 
-    data_loader = TextMelLoader(dataset_path, audiopaths_and_text, args)
+    data_loader = TextMelLoader(audiopaths_and_text, args)
 
     for i in range(len(melpaths_and_text_list)):
         if i%100 == 0:
@@ -58,7 +56,7 @@ def main():
     args = parser.parse_args()
     args.load_mel_from_disk = False
 
-    audio2mel(args.dataset_path, args.wav_files, args.mel_files, args)
+    audio2mel(args.wav_files, args.mel_files, args)
 
 if __name__ == '__main__':
     main()
