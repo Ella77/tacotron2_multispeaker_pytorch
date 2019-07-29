@@ -1,4 +1,5 @@
 import os
+import numpy as np
 
 metadata_path = 'metadata_sm.csv'
 folder = 'filenames_sm'
@@ -23,7 +24,7 @@ with open(metadata_path, 'r') as f:
         if c >= low_filter and c <= up_filter:
             passed += 1
 
-            lines.append('|'.join(['{}{}.wav'.format(data_path, splt[0]), sentence]) + '\n')
+            lines.append('|'.join(['{}{}.wav'.format(data_path, splt[0]), sentence, '1']) + '\n')
         else:
             filtered += 1
 
@@ -37,20 +38,12 @@ if lines:
     except:
         os.mkdir(folder)
 
-    train_amount = int(len(lines) * 0.95)
-    val_amount = int(len(lines) * 0.025)
-    test_amount = len(lines) - train_amount - val_amount
-
-    train = lines[:train_amount]
-    val = lines[train_amount:train_amount+val_amount]
-    test = lines[-test_amount:]
-
     with open(os.path.join(folder, 'train.txt'), 'w') as f:
-        f.writelines(lines)
+         f.writelines(lines[:3100])
 
-    # with open(os.path.join(folder, 'val.txt'), 'w') as f:
-    #     f.writelines(val)
-    #
+    with open(os.path.join(folder, 'val.txt'), 'w') as f:
+        f.writelines(lines[3100:])
+
     # with open(os.path.join(folder, 'test.txt'), 'w') as f:
     #     f.writelines(test)
 

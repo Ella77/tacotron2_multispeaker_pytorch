@@ -595,28 +595,28 @@ class Tacotron2(nn.Module):
         inputs, input_lengths, targets, max_len, output_lengths = inputs
         input_lengths, output_lengths = input_lengths.data, output_lengths.data
 
-        print('Inputs:', inputs.shape)
-        print('Input length:', input_lengths.shape)
-        print('Targets:', targets.shape)
-        print('Max len:', max_len)
-        print('Output lengths:', output_lengths.shape)
+        # print('Inputs:', inputs.shape)
+        # print('Input length:', input_lengths.shape)
+        # print('Targets:', targets.shape)
+        # print('Max len:', max_len)
+        # print('Output lengths:', output_lengths.shape)
 
 
         embedded_inputs = self.embedding(inputs).transpose(1, 2)
 
-        print('Embedded inputs:', self.embedding(inputs).shape)
-        print('Embedded inputs T:', embedded_inputs.shape)
+        # print('Embedded inputs:', self.embedding(inputs).shape)
+        # print('Embedded inputs T:', embedded_inputs.shape)
 
         encoder_outputs = self.encoder(embedded_inputs, input_lengths)
 
-        print('Encoder outputs:', encoder_outputs.shape)
+        # print('Encoder outputs:', encoder_outputs.shape)
 
         mel_outputs, gate_outputs, alignments = self.decoder(
             encoder_outputs, targets, memory_lengths=input_lengths)
 
-        print('Mel outputs:', mel_outputs.shape)
-        print('Gate outputs:', gate_outputs.shape)
-        print('Alignments outputs:', alignments.shape)
+        # print('Mel outputs:', mel_outputs.shape)
+        # print('Gate outputs:', gate_outputs.shape)
+        # print('Alignments outputs:', alignments.shape)
 
         mel_outputs_postnet = self.postnet(mel_outputs)
         mel_outputs_postnet = mel_outputs + mel_outputs_postnet

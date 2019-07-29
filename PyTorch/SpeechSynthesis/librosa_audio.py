@@ -5,9 +5,10 @@ from tqdm import tqdm
 from scipy.io import wavfile
 
 wavs_in_path = "/workspace/data/aws/dataset/samantha/wavs_in"
-wavs_out_path = "/workspace/data/aws/dataset/samantha/wavs"
+wavs_out_path = "/workspace/data/aws/dataset/samantha/wavs_trimed"
 
 sr = 22050
+top_db = 40
 maxv = np.iinfo(np.int16).max
 
 wavs = os.listdir(wavs_in_path)
@@ -15,4 +16,6 @@ wavs = os.listdir(wavs_in_path)
 for wav in tqdm(wavs):
     data, _ = librosa.load(os.path.join(wavs_in_path, wav), sr=sr)
 
-    wavfile.write(os.path.join(wavs_out_path, wav), sr, (data*maxv).astype(np.int16))
+    data, _ = librosa.effects.trim(data, top_db=top_db)
+
+    wavfile.write(os.path.join(wavs_out_path, wav), sr, data)
