@@ -53,13 +53,14 @@ class TextMelLoader(torch.utils.data.Dataset):
         random.seed(1234)
         random.shuffle(self.audiopaths_and_text)
 
-    def get_mel_text_pair(self, audiopath_and_text):
+    def get_mel_text_speaker(self, audiopath_and_text):
         # separate filename and text
-        audiopath, text = audiopath_and_text[0], audiopath_and_text[1]
+        audiopath, text, speaker_id = audiopath_and_text[0], audiopath_and_text[1], audiopath_and_text[2]
         len_text = len(text)
         text = self.get_text(text)
         mel = self.get_mel(audiopath)
-        return (text, mel, len_text)
+
+        return (text, mel, len_text, speaker_id)
 
     def get_mel(self, filename):
         if not self.load_mel_from_disk:
@@ -85,7 +86,7 @@ class TextMelLoader(torch.utils.data.Dataset):
         return text_norm
 
     def __getitem__(self, index):
-        return self.get_mel_text_pair(self.audiopaths_and_text[index])
+        return self.get_mel_text_speaker(self.audiopaths_and_text[index])
 
     def __len__(self):
         return len(self.audiopaths_and_text)
@@ -104,6 +105,7 @@ class TextMelCollate():
         batch: [text_normalized, mel_normalized]
         """
         # Right zero-pad all one-hot text sequences to max input length
+
         input_lengths, ids_sorted_decreasing = torch.sort(
             torch.LongTensor([len(x[0]) for x in batch]),
             dim=0, descending=True)
@@ -135,21 +137,29 @@ class TextMelCollate():
             output_lengths[i] = mel.size(1)
 
         # count number of items - characters in text
-        len_x = [x[2] for x in batch]
+        len_x = []
+        speaker_ids = []
+        for i in range(len(ids_sorted_decreasing)):
+            len_x.append(batch[ids_sorted_decreasing[i]][2])
+            speaker_ids.append(batch[ids_sorted_decreasing[i]][3])
+
         len_x = torch.Tensor(len_x)
+        speaker_ids = torch.Tensor(speaker_ids)
+
         return text_padded, input_lengths, mel_padded, gate_padded, \
-            output_lengths, len_x
+            output_lengths, len_x, speaker_ids
 
 def batch_to_gpu(batch):
     text_padded, input_lengths, mel_padded, gate_padded, \
-        output_lengths, len_x = batch
+        output_lengths, len_x, speaker_ids = batch
     text_padded = to_gpu(text_padded).long()
     input_lengths = to_gpu(input_lengths).long()
     max_len = torch.max(input_lengths.data).item()
     mel_padded = to_gpu(mel_padded).float()
     gate_padded = to_gpu(gate_padded).float()
     output_lengths = to_gpu(output_lengths).long()
-    x = (text_padded, input_lengths, mel_padded, max_len, output_lengths)
+    speaker_ids = to_gpu(speaker_ids).long()
+    x = (text_padded, input_lengths, mel_padded, max_len, output_lengths, speaker_ids)
     y = (mel_padded, gate_padded)
     len_x = torch.sum(output_lengths)
     return (x, y, len_x)

@@ -86,7 +86,7 @@ def parse_args(parser):
     training = parser.add_argument_group('training setup')
     training.add_argument('--epochs', type=int, required=True,
                           help='Number of total epochs to run')
-    training.add_argument('--epochs-per-checkpoint', type=int, default=20,
+    training.add_argument('--epochs-per-checkpoint', type=int, default=10,
                           help='Number of epochs per checkpoint')
     training.add_argument('--seed', type=int, default=1234,
                           help='Seed for PyTorch random number generators')
@@ -388,6 +388,7 @@ def main():
 
     # Restore training from checkpoint logic
     if checkpoint and 'optimizer_state_dict' in checkpoint and not args.warm_start: # TODO: think about this more
+        print('Restoring optimizer state')
         optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
 
     if args.amp_run:
@@ -411,6 +412,7 @@ def main():
         model_name, n_frames_per_step)
     trainset = data_functions.get_data_loader(
         model_name, args.training_files, args)
+
     train_sampler = DistributedSampler(trainset) if distributed_run else None
     train_loader = DataLoader(trainset, num_workers=1, shuffle=False,
                               sampler=train_sampler,
@@ -426,7 +428,6 @@ def main():
     model.train()
 
     LOGGER.log(key=tags.TRAIN_LOOP)
-
 
     # Restore training from checkpoint logic
     if start_epoch >= args.epochs:
@@ -459,9 +460,11 @@ def main():
                                      args.anneal_steps, args.anneal_factor)
 
                 model.zero_grad()
+
                 x, y, num_items = batch_to_gpu(batch)
 
                 y_pred = model(x)
+
                 loss = criterion(y_pred, y)
 
                 if distributed_run:

@@ -144,7 +144,6 @@ class Postnet(nn.Module):
     """Postnet
         - Five 1-d convolution with 512 channels and kernel size 5
     """
-
     def __init__(self, n_mel_channels, postnet_embedding_dim,
                  postnet_kernel_size, postnet_n_convolutions):
         super(Postnet, self).__init__()
@@ -372,13 +371,11 @@ class Decoder(nn.Module):
         gate_outpust: gate output energies
         alignments:
         """
+        #print('Len Alignments:', len(alignments))
         # (T_out, B) -> (B, T_out)
         alignments = torch.stack(alignments).transpose(0, 1)
         # (T_out, B) -> (B, T_out)
-        print('Len', len(gate_outputs))
-
-        # for i in gate_outputs:
-        #     print(i.shape)
+        #print('Len Gate Outputs:', len(gate_outputs))
 
         gate_outputs = torch.stack(gate_outputs).transpose(0, 1)
         gate_outputs = gate_outputs.contiguous()
@@ -465,7 +462,7 @@ class Decoder(nn.Module):
                 decoder_input)
 
             mel_outputs += [mel_output.squeeze(1)]
-            gate_outputs += [gate_output.squeeze()]
+            gate_outputs += [gate_output.squeeze() if memory.shape[0] > 1 else gate_output]
             alignments += [attention_weights]
 
         mel_outputs, gate_outputs, alignments = self.parse_decoder_outputs(
@@ -473,8 +470,65 @@ class Decoder(nn.Module):
 
         return mel_outputs, gate_outputs, alignments
 
+    # def infer(self, memory, memory_lengths):
+    #     """ Decoder inference
+    #     PARAMS
+    #     ------
+    #     memory: Encoder outputs
+    #
+    #     RETURNS
+    #     -------
+    #     mel_outputs: mel outputs from the decoder
+    #     gate_outputs: gate outputs from the decoder
+    #     alignments: sequence of attention weights from the decoder
+    #     """
+    #     decoder_input = self.get_go_frame(memory)
+    #
+    #     # print('memory size', memory.size(0))
+    #     # print('memory_lengths:', memory_lengths)
+    #     if memory.size(0) > 1:
+    #         mask =~ get_mask_from_lengths(memory_lengths)
+    #     else:
+    #         mask = None
+    #
+    #     self.initialize_decoder_states(memory, mask=mask)
+    #
+    #     mel_lengths = torch.zeros([memory.size(0)], dtype=torch.int32)
+    #     not_finished = torch.ones([memory.size(0)], dtype=torch.int32)
+    #     if torch.cuda.is_available():
+    #         mel_lengths = mel_lengths.cuda()
+    #         not_finished = not_finished.cuda()
+    #
+    #
+    #     mel_outputs, gate_outputs, alignments = [], [], []
+    #     while True:
+    #         decoder_input = self.prenet(decoder_input, inference=True)
+    #         mel_output, gate_output, alignment = self.decode(decoder_input)
+    #
+    #         mel_outputs += [mel_output.squeeze(1)]
+    #         gate_outputs += [gate_output]
+    #         alignments += [alignment]
+    #         dec = torch.le(torch.sigmoid(gate_output.data),
+    #                        self.gate_threshold).to(torch.int32).squeeze(1)
+    #
+    #         not_finished = not_finished*dec
+    #         mel_lengths += not_finished
+    #
+    #         if self.early_stopping and torch.sum(not_finished) == 0:
+    #             break
+    #         if len(mel_outputs) == self.max_decoder_steps:
+    #             print("Warning! Reached max decoder steps")
+    #             break
+    #
+    #         decoder_input = mel_output
+    #
+    #     mel_outputs, gate_outputs, alignments = self.parse_decoder_outputs(
+    #         mel_outputs, gate_outputs, alignments)
+    #
+    #     return mel_outputs, gate_outputs, alignments, mel_lengths
 
-    def infer(self, memory, memory_lengths):
+
+    def infer(self, memory):
         """ Decoder inference
         PARAMS
         ------
@@ -488,23 +542,13 @@ class Decoder(nn.Module):
         """
         decoder_input = self.get_go_frame(memory)
 
-        if memory.size(0) > 1:
-            mask =~ get_mask_from_lengths(memory_lengths)
-        else:
-            mask = None
+        self.initialize_decoder_states(memory, mask=None)
 
-        self.initialize_decoder_states(memory, mask=mask)
-
-        mel_lengths = torch.zeros([memory.size(0)], dtype=torch.int32)
-        not_finished = torch.ones([memory.size(0)], dtype=torch.int32)
-        if torch.cuda.is_available():
-            mel_lengths = mel_lengths.cuda()
-            not_finished = not_finished.cuda()
-
-
+        mel_lengths = torch.zeros([memory.size(0)], dtype=torch.int32).cuda()
+        not_finished = torch.ones([memory.size(0)], dtype=torch.int32).cuda()
         mel_outputs, gate_outputs, alignments = [], [], []
         while True:
-            decoder_input = self.prenet(decoder_input, inference=True)
+            decoder_input = self.prenet(decoder_input)
             mel_output, gate_output, alignment = self.decode(decoder_input)
 
             mel_outputs += [mel_output.squeeze(1)]
@@ -527,13 +571,13 @@ class Decoder(nn.Module):
         mel_outputs, gate_outputs, alignments = self.parse_decoder_outputs(
             mel_outputs, gate_outputs, alignments)
 
-        return mel_outputs, gate_outputs, alignments, mel_lengths
+        return mel_outputs, gate_outputs, alignments
 
 
 class Tacotron2(nn.Module):
     def __init__(self, mask_padding, n_mel_channels,
-                 n_symbols, symbols_embedding_dim, encoder_kernel_size,
-                 encoder_n_convolutions, encoder_embedding_dim,
+                 n_symbols, symbols_embedding_dim, n_speakers, speakers_embedding_dim,
+                 encoder_kernel_size, encoder_n_convolutions, encoder_embedding_dim,
                  attention_rnn_dim, attention_dim, attention_location_n_filters,
                  attention_location_kernel_size, n_frames_per_step,
                  decoder_rnn_dim, prenet_dim, max_decoder_steps, gate_threshold,
@@ -544,16 +588,31 @@ class Tacotron2(nn.Module):
         self.mask_padding = mask_padding
         self.n_mel_channels = n_mel_channels
         self.n_frames_per_step = n_frames_per_step
-        self.embedding = nn.Embedding(
+
+        self.symbols_embedding = nn.Embedding(
             n_symbols, symbols_embedding_dim)
         std = sqrt(2.0 / (n_symbols + symbols_embedding_dim))
         val = sqrt(3.0) * std  # uniform bounds for std
-        self.embedding.weight.data.uniform_(-val, val)
+        self.symbols_embedding.weight.data.uniform_(-val, val)
+
+        self.speakers_embedding = nn.Embedding(
+            n_speakers, speakers_embedding_dim)
+
+        # std = sqrt(2.0 / (n_speakers + speakers_embedding_dim))
+        # val = sqrt(3.0) * std  # uniform bounds for std
+        # self.speakers_embedding.weight.data.uniform_(-val, val)
+
+        torch.nn.init.xavier_uniform_(self.speakers_embedding.weight)
+
+
         self.encoder = Encoder(encoder_n_convolutions,
                                encoder_embedding_dim,
                                encoder_kernel_size)
+
+        encoder_and_speakers_embedding_dim = encoder_embedding_dim + speakers_embedding_dim
+
         self.decoder = Decoder(n_mel_channels, n_frames_per_step,
-                               encoder_embedding_dim, attention_dim,
+                               encoder_and_speakers_embedding_dim, attention_dim,
                                attention_location_n_filters,
                                attention_location_kernel_size,
                                attention_rnn_dim, decoder_rnn_dim,
@@ -561,22 +620,24 @@ class Tacotron2(nn.Module):
                                gate_threshold, p_attention_dropout,
                                p_decoder_dropout,
                                not decoder_no_early_stopping)
+
         self.postnet = Postnet(n_mel_channels, postnet_embedding_dim,
                                postnet_kernel_size,
                                postnet_n_convolutions)
 
     def parse_batch(self, batch):
         text_padded, input_lengths, mel_padded, gate_padded, \
-            output_lengths = batch
+            output_lengths, speaker_ids = batch
         text_padded = to_gpu(text_padded).long()
         input_lengths = to_gpu(input_lengths).long()
         max_len = torch.max(input_lengths.data).item()
         mel_padded = to_gpu(mel_padded).float()
         gate_padded = to_gpu(gate_padded).float()
         output_lengths = to_gpu(output_lengths).long()
+        speaker_ids = to_gpu(speaker_ids).long()
 
         return (
-            (text_padded, input_lengths, mel_padded, max_len, output_lengths),
+            (text_padded, input_lengths, mel_padded, max_len, output_lengths, speaker_ids),
             (mel_padded, gate_padded))
 
     def parse_output(self, outputs, output_lengths=None):
@@ -592,7 +653,7 @@ class Tacotron2(nn.Module):
         return outputs
 
     def forward(self, inputs):
-        inputs, input_lengths, targets, max_len, output_lengths = inputs
+        inputs, input_lengths, targets, max_len, output_lengths, speaker_ids = inputs
         input_lengths, output_lengths = input_lengths.data, output_lengths.data
 
         # print('Inputs:', inputs.shape)
@@ -600,19 +661,38 @@ class Tacotron2(nn.Module):
         # print('Targets:', targets.shape)
         # print('Max len:', max_len)
         # print('Output lengths:', output_lengths.shape)
+        # print('Speaker ids:', speaker_ids)
+        #
+        # print('INPUTS:', inputs[:, 0])
+        # print('Symbols Embedding:', self.symbols_embedding(inputs)[:, 0, 0])
 
-
-        embedded_inputs = self.embedding(inputs).transpose(1, 2)
-
-        # print('Embedded inputs:', self.embedding(inputs).shape)
-        # print('Embedded inputs T:', embedded_inputs.shape)
-
+        embedded_inputs = self.symbols_embedding(inputs).transpose(1, 2)
         encoder_outputs = self.encoder(embedded_inputs, input_lengths)
 
+        # print('Embedded inputs:', embedded_inputs[:, 0, 0])
+        # print('Embedded inputs:', self.symbols_embedding(inputs).shape)
+        # print('Embedded inputs T:', embedded_inputs.shape)
         # print('Encoder outputs:', encoder_outputs.shape)
 
+        speaker_ids = speaker_ids.unsqueeze(1)
+        embedded_speakers = self.speakers_embedding(speaker_ids)
+        embedded_speakers = embedded_speakers.repeat(1, max_len, 1)
+
+        # print('First speaker:', speaker_ids[0][0])
+        # print('First speaker embedding:', embedded_speakers[0][0])
+
+        #print('Encoder outputs:', encoder_outputs[:, 0, 0])
+
+        merged_outputs = torch.cat([encoder_outputs, embedded_speakers], -1)
+
+        # print('Embedded speakers:', embedded_speakers.shape)
+        #print('Speaker ids:', speaker_ids)
+        # print('Embedded speakers beginnings:', embedded_speakers[:, 0, 0])
+        # print('Encoder outputs:', encoder_outputs.shape)
+        # print('Merged outputs:', merged_outputs.shape)
+
         mel_outputs, gate_outputs, alignments = self.decoder(
-            encoder_outputs, targets, memory_lengths=input_lengths)
+            merged_outputs, targets, memory_lengths=input_lengths)
 
         # print('Mel outputs:', mel_outputs.shape)
         # print('Gate outputs:', gate_outputs.shape)
@@ -621,21 +701,69 @@ class Tacotron2(nn.Module):
         mel_outputs_postnet = self.postnet(mel_outputs)
         mel_outputs_postnet = mel_outputs + mel_outputs_postnet
 
+        # print('Speakers:', speaker_ids)
+
+        #print('Mel outputs postnet:', mel_outputs_postnet)
+
+        #torch.save(mel_outputs_postnet, 'file.pt')
+        #raise
         return self.parse_output(
             [mel_outputs, mel_outputs_postnet, gate_outputs, alignments],
             output_lengths)
 
-    def infer(self, inputs, input_lengths):
 
-        embedded_inputs = self.embedding(inputs).transpose(1, 2)
-        encoder_outputs = self.encoder(embedded_inputs, input_lengths)
-        mel_outputs, gate_outputs, alignments, mel_lengths = self.decoder.infer(
-            encoder_outputs, input_lengths)
+    # def infer(self, inputs, input_lengths, speaker_id):
+    #     speaker_id = speaker_id.unsqueeze(1)
+    #
+    #     embedded_speaker = self.speakers_embedding(speaker_id)
+    #
+    #     embedded_speaker = embedded_speaker.repeat(1, input_lengths, 1)
+    #
+    #     embedded_inputs = self.symbols_embedding(inputs).transpose(1, 2)
+    #     encoder_outputs = self.encoder(embedded_inputs, input_lengths)
+    #
+    #     merged_outputs = torch.cat([encoder_outputs, embedded_speaker], -1)
+    #
+    #     mel_outputs, gate_outputs, alignments, mel_lengths = self.decoder.infer(
+    #         merged_outputs, input_lengths)
+    #
+    #     mel_outputs_postnet = self.postnet(mel_outputs)
+    #     mel_outputs_postnet = mel_outputs + mel_outputs_postnet
+    #
+    #
+    #     outputs = self.parse_output(
+    #         [mel_outputs, mel_outputs_postnet, gate_outputs, alignments, mel_lengths])
+    #
+    #     return outputs
+
+
+    def infer(self, inputs, speaker_id):
+        # inputs = self.parse_input(inputs)
+
+        embedded_inputs = self.symbols_embedding(inputs).transpose(1, 2)
+        encoder_outputs = self.encoder.infer(embedded_inputs)
+
+        speaker_id = speaker_id.unsqueeze(1)
+
+        # print(speaker_id.shape)
+
+        embedded_speaker = self.speakers_embedding(speaker_id)
+
+        # print('Embedded speaker:', embedded_speaker.shape)
+
+        embedded_speaker = embedded_speaker.repeat(1, encoder_outputs.shape[1], 1)
+
+        # print('Embedded speaker repeat:', embedded_speaker.shape)
+
+        merged_outputs = torch.cat([encoder_outputs, embedded_speaker], -1)
+
+        mel_outputs, gate_outputs, alignments = self.decoder.infer(
+            merged_outputs)
 
         mel_outputs_postnet = self.postnet(mel_outputs)
         mel_outputs_postnet = mel_outputs + mel_outputs_postnet
 
         outputs = self.parse_output(
-            [mel_outputs, mel_outputs_postnet, gate_outputs, alignments, mel_lengths])
+            [mel_outputs, mel_outputs_postnet, gate_outputs, alignments])
 
         return outputs

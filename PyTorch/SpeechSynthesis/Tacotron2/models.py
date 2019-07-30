@@ -79,6 +79,9 @@ def get_model_config(model_name, args):
             # symbols
             n_symbols=args.n_symbols,
             symbols_embedding_dim=args.symbols_embedding_dim,
+            # speakers
+            n_speakers=args.n_speakers,
+            speakers_embedding_dim=args.speakers_embedding_dim,
             # encoder
             encoder_kernel_size=args.encoder_kernel_size,
             encoder_n_convolutions=args.encoder_n_convolutions,

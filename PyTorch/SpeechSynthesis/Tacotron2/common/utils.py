@@ -52,8 +52,9 @@ def load_filepaths_and_text(filename, split="|"):
                     "incorrect line format for file: {}".format(filename))
             path = parts[0]
             text = parts[1]
+            speaker_id = int(parts[2])
 
-            return path,text
+            return path, text, speaker_id
         filepaths_and_text = [split_line(line) for line in f]
     return filepaths_and_text
 
