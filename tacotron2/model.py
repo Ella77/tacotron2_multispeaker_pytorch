@@ -37,6 +37,8 @@ sys.path.append(abspath(dirname(__file__)+'/../'))
 from common.layers import ConvNorm, LinearNorm
 from common.utils import to_gpu, get_mask_from_lengths
 
+from hparams import Hyperparameters as hp
+
 
 class LocationLayer(nn.Module):
     def __init__(self, attention_n_filters, attention_kernel_size,
@@ -205,8 +207,8 @@ class Encoder(nn.Module):
                          dilation=1, w_init_gain='relu'),
                 nn.BatchNorm1d(encoder_embedding_dim))
             convolutions.append(conv_layer)
-            self.convolutions = nn.ModuleList(convolutions)
-
+        
+        self.convolutions = nn.ModuleList(convolutions)
         self.lstm = nn.LSTM(encoder_embedding_dim,
                             int(encoder_embedding_dim / 2), 1,
                             batch_first=True, bidirectional=True)
@@ -470,7 +472,6 @@ class Decoder(nn.Module):
 
         return mel_outputs, gate_outputs, alignments
 
-
     def infer(self, memory):
         """ Decoder inference
         PARAMS
@@ -515,6 +516,194 @@ class Decoder(nn.Module):
             mel_outputs, gate_outputs, alignments)
 
         return mel_outputs, gate_outputs, alignments
+
+
+class GST(nn.Module):
+    def __init__(self):
+        super(GST, self).__init__()
+        self.encoder = ReferenceEncoder()
+        self.stl = STL()
+
+    def forward(self, inputs):                 # [N, Ty/r, n_mels*r] (r=n_frames_per_step)
+        enc_out = self.encoder(inputs)         # [N, ref_enc_gru_size]
+        style_embed = self.stl(enc_out)        # [N, 1, style_embedding_size]
+
+        return style_embed
+
+
+class ReferenceEncoder(nn.Module):
+    """
+    inputs  [N, Ty/r, n_mels*r]
+    outputs [N, ref_enc_gru_size]
+    """
+    def __init__(self):
+        super(ReferenceEncoder, self).__init__()
+
+        n_filters = len(hp.ref_enc_filters)
+        filters = [1] + hp.ref_enc_filters
+
+        convolutions = []
+
+        out_channels = self._calculate_channels(hp.n_mel_channels, hp.ref_enc_kernel_size,
+                                                hp.ref_enc_stride, hp.ref_enc_pad, n_filters)
+
+        for i in range(n_filters):
+            conv_layer = nn.Sequential(
+                    nn.Conv2d(in_channels=filters[i],
+                          out_channels=filters[i + 1],
+                          kernel_size=(hp.ref_enc_kernel_size, hp.ref_enc_kernel_size),
+                          stride=(hp.ref_enc_stride, hp.ref_enc_stride),
+                          padding=(hp.ref_enc_pad, hp.ref_enc_pad)
+                        ),
+                    nn.BatchNorm2d(num_features=hp.ref_enc_filters[i])
+                )
+            convolutions.append(conv_layer)
+
+        self.convolutions = nn.ModuleList(convolutions)
+        self.gru = nn.GRU(input_size=hp.ref_enc_filters[-1] * out_channels,
+                          hidden_size=hp.style_embedding_size // 2,
+                          batch_first=True)
+
+    def _calculate_channels(self, S, kernel_size, stride, pad, n_convs):
+        for i in range(n_convs):
+            S = (S - kernel_size + 2 * pad) // stride + 1
+        return S
+
+    def forward(self, inputs):
+        N = inputs.size(0)
+        x = inputs.view(N, 1, -1, hp.n_mel_channels) # [N, 1, Ty, n_mel_channels]
+
+        for conv in self.convolutions:               # [N, 128, Ty//2^n_filters, n_mel_channels//2^n_filters]
+            x = F.relu(conv(x))          
+
+        x = x.transpose(1, 2)                        # [N, Ty//2^n_filters, 128, n_mel_channels//2^n_filters]
+        N = x.size(0)
+        T = x.size(1)
+
+        x = x.contiguous().view(N, T, -1)            # [N, Ty//2^n_filters, 128*n_mel_channels//2^n_filters]
+
+        memory, x = self.gru(x)                      # [1, N, style_embedding_size//2]
+
+        x = x.squeeze(0)                             # [N, style_embedding_size//2]
+
+        return x
+
+
+class STL(nn.Module):
+    """
+    inputs  [N, style_embedding_size//2]
+    outputs [N, style_embedding_size]
+    """
+    def __init__(self):
+        super(STL, self).__init__()
+
+        d_q = hp.style_embedding_size // 2
+        d_k = hp.style_embedding_size // hp.gst_n_heads
+
+        self.embed = nn.Parameter(torch.FloatTensor(hp.gst_n_tokens, hp.style_embedding_size // hp.gst_n_heads))
+        nn.init.normal_(self.embed, mean=0, std=0.5)
+
+        self.attention = MultiHeadAttention(d_q, d_k, hp.style_embedding_size, hp.gst_n_heads)
+
+    def forward(self, inputs):
+        N = inputs.size(0)
+        
+        queries = inputs.unsqueeze(1)                    # [N, 1, style_embedding_size//2]
+        keys = F.tanh(self.embed)
+        keys = keys..unsqueeze(0).expand(N, -1, -1)      # [N, gst_n_tokens, style_embedding_size//gst_n_heads]
+
+        style_embedding = self.attention(queries, keys)  # [N, 1, style_embedding_size]
+
+        return style_embedding_size
+
+
+class MultiHeadAttention(nn.Module):
+    """
+    input:
+        query [N, T_q, query_dim]
+        key   [N, T_k, key_dim]
+    output:
+        out   [N, T_q, num_units]
+    """
+    def __init__(self, query_dim, key_dim, num_units, num_heads):
+        super(MultiHeadAttention, self).__init__()
+
+        if key_dim % num_heads != 0:
+            raise ValueError("Key depth {} must be divisible by the number of "
+                             "attention heads {}".format(key_dim, num_heads))
+        
+        self.num_units = num_units
+        self.num_heads = num_heads
+        self.query_scale = (key_dim//num_heads)**-0.5
+        
+        self.query_linear = nn.Linear(query_dim, total_key_depth, bias=False)
+        self.key_linear = nn.Linear(key_dim, total_key_depth, bias=False)
+        self.value_linear = nn.Linear(key_dim, total_key_depth, bias=False)
+        #self.output_linear = nn.Linear(key_dim, output_depth, bias=False)
+        #self.dropout = nn.Dropout(dropout)
+
+    def _split_heads(self, x):
+        """
+        Split x such to add an extra num_heads dimension
+        Input:
+            x: a Tensor with shape [batch_size, seq_len, depth]
+        Returns:
+            A Tensor with shape [batch_size, num_heads, seq_len, depth / num_heads]
+        """
+        if len(x.shape) != 3:
+            raise ValueError("x must have rank 3")
+
+        shape = x.shape
+        return x.view(shape[0], shape[1], self.num_heads, shape[2]//self.num_heads).permute(0, 2, 1, 3)
+
+    def _merge_heads(self, x):
+        """
+        Merge the extra num_heads into the last dimension
+        Input:
+            x: a Tensor with shape [batch_size, num_heads, seq_len, depth/num_heads]
+        Output:
+            A Tensor with shape [batch_size, seq_len, depth]
+        """
+        if len(x.shape) != 4:
+            raise ValueError("x must have rank 4")
+        shape = x.shape
+        
+        return x.permute(0, 2, 1, 3).contiguous().\
+                view(shape[0], shape[2], shape[3] * self.num_heads)
+
+    def forward(self, queries, keys, values):
+        # Linear for Each
+        queries = self.query_linear(queries)                     # [N, T_q, num_units]
+        keys = self.key_linear(keys)                             # [N, T_k, num_units]
+        values = self.value_linear(values)                       # [N, T_k, num_units]          
+        
+        # Split into heads
+        queries = self._split_heads(queries)                     # [N, num_heads, T_q, num_units/num_heads]
+        keys = self._split_heads(keys)                           # [N, num_heads, T_k, num_units/num_heads]
+        values = self._split_heads(values)                       # [N, num_heads, T_k, num_units/num_heads]
+        
+        # Scale queries
+        queries *= self.query_scale
+        
+        # Combine queries and keys
+        logits = torch.matmul(queries, keys.permute(0, 1, 3, 2)) # [N, num_heads, T_q, T_k]
+                
+        # Convert to probabilities
+        scores = F.softmax(logits, dim=-1)                       # [N, num_heads, T_q, T_k]
+        
+        # Dropout
+        #scores = self.dropout(scores)                          
+        
+        # Combine with values to get context
+        contexts = torch.matmul(scores, values)                  # [N, num_heads, T_q, num_units/num_heads]
+        
+        # Merge heads
+        contexts = self._merge_heads(contexts)                   # [N, T_q, num_units]
+        
+        # Linear to get output
+        # outputs = self.output_linear(contexts)
+        
+        return contexts                                          
 
 
 class Tacotron2(nn.Module):
@@ -600,7 +789,7 @@ class Tacotron2(nn.Module):
 
         speaker_ids = speaker_ids.unsqueeze(1)
         embedded_speakers = self.speakers_embedding(speaker_ids)
-        embedded_speakers = embedded_speakers.repeat(1, max_len, 1)
+        embedded_speakers = embedded_speakers.expand(-1, max_len, -1)
 
         merged_outputs = torch.cat([encoder_outputs, embedded_speakers], -1)
 
@@ -614,13 +803,12 @@ class Tacotron2(nn.Module):
             [mel_outputs, mel_outputs_postnet, gate_outputs, alignments],
             output_lengths)
 
-
     def infer(self, inputs, speaker_id):
         embedded_inputs = self.symbols_embedding(inputs).transpose(1, 2)
         encoder_outputs = self.encoder.infer(embedded_inputs)
 
         embedded_speaker = self.speakers_embedding(speaker_id)
-        embedded_speaker = embedded_speaker.repeat(1, encoder_outputs.shape[1], 1)
+        embedded_speaker = embedded_speaker.expand(-1, encoder_outputs.shape[1], -1)
 
         merged_outputs = torch.cat([encoder_outputs, embedded_speaker], -1)
 
