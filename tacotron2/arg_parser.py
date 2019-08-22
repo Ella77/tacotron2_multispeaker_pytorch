@@ -69,8 +69,7 @@ def parse_tacotron2_args(parent, add_help=False):
 
     # decoder parameters
     decoder = parser.add_argument_group('decoder parameters')
-    decoder.add_argument('--n-frames-per-step', default=1,
-                         type=int,
+    decoder.add_argument('--n-frames-per-step', default=1, type=int,
                          help='Number of frames processed per step') # currently only 1 is supported
     decoder.add_argument('--decoder-rnn-dim', default=1024, type=int,
                          help='Number of units in decoder LSTM')

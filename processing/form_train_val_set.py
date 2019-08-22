@@ -5,15 +5,15 @@ import pandas as pd
 from tqdm import tqdm
 
 np.random.seed(42)
-N = 7100
+N = 10000
 
 if __name__ == '__main__':
     speakers = {
-        #'blizzard_2013': 2,
+        'blizzard_2013': 2,
         #'elizabeth_klett': 5,
-        'judy_bieber': 3,
+        #'judy_bieber': 3,
         'linda_johnson': 0,
-        'mary_ann': 4,
+        #'mary_ann': 4,
         'samantha_old': 1, #'samantha_fresh': 1,
         #'elliot_miller': 6
     }

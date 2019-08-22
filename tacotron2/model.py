@@ -608,13 +608,13 @@ class STL(nn.Module):
     def forward(self, inputs):
         N = inputs.size(0)
         
-        queries = inputs.unsqueeze(1)                    # [N, 1, style_embedding_size//2]
+        queries = inputs.unsqueeze(1)                          # [N, 1, style_embedding_size//2]
         keys = F.tanh(self.embed)
-        keys = keys..unsqueeze(0).expand(N, -1, -1)      # [N, gst_n_tokens, style_embedding_size//gst_n_heads]
+        keys = keys.unsqueeze(0).expand(N, -1, -1)             # [N, gst_n_tokens, style_embedding_size//gst_n_heads]
 
-        style_embedding = self.attention(queries, keys)  # [N, 1, style_embedding_size]
+        style_embedding = self.attention(queries, keys, keys)  # [N, 1, style_embedding_size]
 
-        return style_embedding_size
+        return style_embedding
 
 
 class MultiHeadAttention(nn.Module):
@@ -636,9 +636,9 @@ class MultiHeadAttention(nn.Module):
         self.num_heads = num_heads
         self.query_scale = (key_dim//num_heads)**-0.5
         
-        self.query_linear = nn.Linear(query_dim, total_key_depth, bias=False)
-        self.key_linear = nn.Linear(key_dim, total_key_depth, bias=False)
-        self.value_linear = nn.Linear(key_dim, total_key_depth, bias=False)
+        self.query_linear = nn.Linear(query_dim, num_units, bias=False)
+        self.key_linear = nn.Linear(key_dim, num_units, bias=False)
+        self.value_linear = nn.Linear(key_dim, num_units, bias=False)
         #self.output_linear = nn.Linear(key_dim, output_depth, bias=False)
         #self.dropout = nn.Dropout(dropout)
 
@@ -739,6 +739,8 @@ class Tacotron2(nn.Module):
 
         encoder_and_speakers_embedding_dim = encoder_embedding_dim + speakers_embedding_dim
 
+        self.gst = GST()
+
         self.decoder = Decoder(n_mel_channels, n_frames_per_step,
                                encoder_and_speakers_embedding_dim, attention_dim,
                                attention_location_n_filters,
@@ -781,17 +783,34 @@ class Tacotron2(nn.Module):
         return outputs
 
     def forward(self, inputs):
+        # Parse inputs
         inputs, input_lengths, targets, max_len, output_lengths, speaker_ids = inputs
         input_lengths, output_lengths = input_lengths.data, output_lengths.data
 
+        print('Inputs:', inputs.shape)
+        print('Input lengths:', input_lengths.shape)
+        print('Targets:', targets.shape)
+        print('Max len:', max_len)
+        print('Output lengths:', output_lengths.shape)
+        print('Speaker ids:', speaker_ids.shape)
+
+        # Extract symbols embedding
         embedded_inputs = self.symbols_embedding(inputs).transpose(1, 2)
+        # Get encoder outputs
         encoder_outputs = self.encoder(embedded_inputs, input_lengths)
 
+        # Get style tokens
+        ref_mels = targets
+        style_embeddings = self.gst(ref_mels)
+        style_embeddings = style_embeddings.expand_as(encoder_outputs)
+
+        # Extract speaker embeddings
         speaker_ids = speaker_ids.unsqueeze(1)
         embedded_speakers = self.speakers_embedding(speaker_ids)
         embedded_speakers = embedded_speakers.expand(-1, max_len, -1)
 
-        merged_outputs = torch.cat([encoder_outputs, embedded_speakers], -1)
+        # Combine symbols, style, and speaker embeddings
+        merged_outputs = torch.cat([encoder_outputs + style_embeddings, embedded_speakers], -1)
 
         mel_outputs, gate_outputs, alignments = self.decoder(
             merged_outputs, targets, memory_lengths=input_lengths)
