@@ -98,19 +98,111 @@ def mapper(job):
 
 
 if __name__ == '__main__':
-    output_directory = '/workspace/training_data'
+    output_directory = './preprocessed_data'
 
     data = [
-        # (
-        #     '/workspace/data/aws/dataset/linda_johnson',
-        #     0,
-        #     False
-        # ),
         (
-            '/workspace/data/gcp/samantha_old', #'/workspace/data/aws/dataset/samantha_fresh',
+            './data/boyoung_audio', #'/workspace/data/aws/dataset/samantha_fresh',
+            0,
+            True
+        ),
+        (
+            './data/boyoung_audio_1.0down', #'/workspace/data/aws/dataset/samantha_fresh',
             1,
             True
         ),
+        (
+            './data/boyoung_audio_1.0up', #'/workspace/data/aws/dataset/samantha_fresh',
+            2,
+            True
+        ),
+        (
+            './data/boyoung_audio_2.0down', #'/workspace/data/aws/dataset/samantha_fresh',
+            3,
+            True
+        ),
+        (
+            './data/boyoung_audio_2.0up', #'/workspace/data/aws/dataset/samantha_fresh',
+            4,
+            True
+        ),
+        (
+            './data/shinhye_audio', #'/workspace/data/aws/dataset/samantha_fresh',
+            5,
+            True
+        ),
+        (
+            './data/shinhye_audio_1.0down', #'/workspace/data/aws/dataset/samantha_fresh',
+            6,
+            True
+        ),
+        (
+            './data/shinhye_audio_1.0up', #'/workspace/data/aws/dataset/samantha_fresh',
+            7,
+            True
+        ),
+        (
+            './data/shinhye_audio_2.0down', #'/workspace/data/aws/dataset/samantha_fresh',
+            8,
+            True
+        ),
+        (
+            './data/shinhye_audio_2.0up', #'/workspace/data/aws/dataset/samantha_fresh',
+            9,
+            True
+        ),
+        (
+            './data/kongyou_audio', #'/workspace/data/aws/dataset/samantha_fresh',
+            10,
+            True
+        ),
+        (
+            './data/kongyou_audio_1.0down', #'/workspace/data/aws/dataset/samantha_fresh',
+            11,
+            True
+        ),
+        (
+            './data/kongyou_audio_1.0up', #'/workspace/data/aws/dataset/samantha_fresh',
+            12,
+            True
+        ),
+        (
+            './data/kongyou_audio_2.0down', #'/workspace/data/aws/dataset/samantha_fresh',
+            13,
+            True
+        ),
+        (
+            './data/kongyou_audio_2.0up', #'/workspace/data/aws/dataset/samantha_fresh',
+            14,
+            True
+        ),
+        (
+            './data/boyoung_audio', #'/workspace/data/aws/dataset/samantha_fresh',
+            1,
+            True
+        ),   (
+            './data/boyoung_audio', #'/workspace/data/aws/dataset/samantha_fresh',
+            1,
+            True
+        ),   (
+            './data/boyoung_audio', #'/workspace/data/aws/dataset/samantha_fresh',
+            1,
+            True
+        ),   (
+            './data/boyoung_audio', #'/workspace/data/aws/dataset/samantha_fresh',
+            1,
+            True
+        ),
+
+
+
+
+
+
+
+
+
+
         # (
         #     '/workspace/data/aws/dataset/blizzard_2013',
         #     2,
