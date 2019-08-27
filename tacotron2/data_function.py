@@ -28,6 +28,7 @@
 import random
 import numpy as np
 import torch
+
 import torch.utils.data
 
 import common.layers as layers
@@ -55,7 +56,8 @@ class TextMelLoader(torch.utils.data.Dataset):
 
     def get_mel_text_speaker(self, audiopath_and_text):
         # separate filename and text
-        audiopath, text, speaker_id = audiopath_and_text[0], audiopath_and_text[1], audiopath_and_text[2]
+        realpath = 'processing/'+audiopath_and_text[0][1:]
+        audiopath, text, speaker_id = realpath, audiopath_and_text[1], audiopath_and_text[2]
         len_text = len(text)
         text = self.get_text(text)
         mel = self.get_mel(audiopath)
@@ -82,7 +84,7 @@ class TextMelLoader(torch.utils.data.Dataset):
         return melspec
 
     def get_text(self, text):
-        text_norm = torch.IntTensor(text_to_sequence(text, self.text_cleaners))
+        text_norm = torch.IntTensor(text_to_sequence(text, ['text_cleaners']))
         return text_norm
 
     def __getitem__(self, index):
