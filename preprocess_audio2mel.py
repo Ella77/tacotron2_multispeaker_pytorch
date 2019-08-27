@@ -13,11 +13,11 @@ def parse_args(parser):
     parser.add_argument('--mel-files', required=True,
                         type=str, help='Path to filelist with mel paths and text')
     parser.add_argument('--text-cleaners', nargs='*',
-                        default=['english_cleaners'], type=str,
+                        default=['korean_cleaners'], type=str,
                         help='Type of text cleaners for input text')
     parser.add_argument('--max-wav-value', default=32768.0, type=float,
                         help='Maximum audiowave value')
-    parser.add_argument('--sampling-rate', default=22050, type=int,
+    parser.add_argument('--sampling-rate', default=24000, type=int,
                         help='Sampling rate')
     parser.add_argument('--filter-length', default=1024, type=int,
                         help='Filter length')

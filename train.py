@@ -119,18 +119,18 @@ def parse_args(parser):
     dataset.add_argument('--load-mel-from-disk', action='store_true',
                          help='Loads mel spectrograms from disk instead of computing them on the fly')
     dataset.add_argument('--training-files',
-                         type=str, help='Path to training filelist')
+                         type=str, default='final_train.txt',help='Path to training filelist')
     dataset.add_argument('--validation-files',
-                         type=str, help='Path to validation filelist')
-    dataset.add_argument('--text-cleaners', nargs='*',
-                         default=['english_cleaners'], type=str,
+                         type=str, default='final_val.txt',help='Path to validation filelist')
+    dataset.add_argument('--text-cleaners',type=str,
+                         default='korean_cleaners',
                          help='Type of text cleaners for input text')
 
     # audio parameters
     audio = parser.add_argument_group('audio parameters')
     audio.add_argument('--max-wav-value', default=32768.0, type=float,
                        help='Maximum audiowave value')
-    audio.add_argument('--sampling-rate', default=22050, type=int,
+    audio.add_argument('--sampling-rate', default=24000, type=int,
                        help='Sampling rate')
     audio.add_argument('--filter-length', default=1024, type=int,
                        help='Filter length')
@@ -148,7 +148,7 @@ def parse_args(parser):
     #                          help='enable distributed run')
     distributed.add_argument('--rank', default=0, type=int,
                              help='Rank of the process, do not set! Done by multiproc module')
-    distributed.add_argument('--world-size', default=1, type=int,
+    distributed.add_argument('--world-size', default=4, type=int,
                              help='Number of processes, do not set! Done by multiproc module')
     distributed.add_argument('--dist-url', type=str, default='tcp://localhost:23456',
                              help='Url used to set up distributed training')
@@ -174,10 +174,14 @@ def init_distributed(args, world_size, rank, group_name):
     # Set cuda device so everything is done on the right GPU.
     torch.cuda.set_device(rank % torch.cuda.device_count())
 
+
     # Initialize distributed communication
     dist.init_process_group(
         backend=args.dist_backend, init_method=args.dist_url,
         world_size=world_size, rank=rank, group_name=group_name)
+    args.world_size = dist.get_world_size()
+    print("world_Size", world_size)
+
 
     print("Done initializing distributed")
 
@@ -340,7 +344,9 @@ def main():
     torch.backends.cudnn.enabled = args.cudnn_enabled
     torch.backends.cudnn.benchmark = args.cudnn_benchmark
 
-    distributed_run = args.world_size > 1
+    num_gpus = torch.cuda.device_count()
+    print("gpus",num_gpus)
+    distributed_run = num_gpus > 1
     if distributed_run:
         init_distributed(args, args.world_size, args.rank, args.group_name)
 
@@ -377,10 +383,13 @@ def main():
     else:
         model_config = models.get_model_config(model_name, args)
         model = models.get_model(model_name, model_config, to_cuda=True)
-
-
-    if not args.amp_run and distributed_run:
-        model = DDP(model)
+        print("model configured")
+        #model.cuda(4)
+    model.cuda()
+    # if not args.amp_run and distributed_run:
+    #     model = DDP(model ,delay_allreduce=True)
+    #
+    #
 
 
     optimizer = torch.optim.Adam(model.parameters(), lr=args.learning_rate,
@@ -393,14 +402,17 @@ def main():
 
     if args.amp_run:
         model, optimizer = amp.initialize(model, optimizer, opt_level="O1")
-        if distributed_run:
-            model = DDP(model)
+        print("amp initialized")
+
+        model = DDP(model, delay_allreduce=True)
+        print("ddpmodel")
 
     try:
         sigma = args.sigma
     except AttributeError:
         sigma = None
 
+    print("train starting")
     criterion = loss_functions.get_loss_function(model_name, sigma)
 
     try:
@@ -408,16 +420,21 @@ def main():
     except AttributeError:
         n_frames_per_step = None
 
+
+    print("data loading start")
     collate_fn = data_functions.get_collate_function(
         model_name, n_frames_per_step)
     trainset = data_functions.get_data_loader(
         model_name, args.training_files, args)
 
     train_sampler = DistributedSampler(trainset) if distributed_run else None
-    train_loader = DataLoader(trainset, num_workers=1, shuffle=False,
-                              sampler=train_sampler,
-                              batch_size=args.batch_size, pin_memory=False,
-                              drop_last=True, collate_fn=collate_fn)
+    print("train loader started")
+
+    train_loader = DataLoader(trainset,num_workers=1,  shuffle=False,
+                                  sampler=train_sampler,
+                                  batch_size=args.batch_size, pin_memory=False,
+                                  drop_last=True, collate_fn=collate_fn)
+
 
     valset = data_functions.get_data_loader(
         model_name, args.validation_files, args)
@@ -450,6 +467,7 @@ def main():
             overflow = False
 
             for i, batch in enumerate(train_loader):
+
                 print("Batch: {}/{} epoch {}".format(i, len(train_loader), epoch))
                 LOGGER.iteration_start()
                 iter_start_time = time.time()
@@ -509,6 +527,7 @@ def main():
                            value=items_per_sec)
                 LOGGER.log(key="iter_time", value=iter_time)
                 LOGGER.iteration_stop()
+
 
             LOGGER.log(key=tags.TRAIN_EPOCH_STOP, value=epoch)
             epoch_stop_time = time.time()

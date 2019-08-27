@@ -24,7 +24,7 @@
 #  SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #
 # *****************************************************************************
-
+#
 import sys
 import subprocess
 
@@ -77,9 +77,34 @@ def main():
         for worker in workers:
             worker.wait()
         raise
-
+    print("worldsize",world_size, worker)
     sys.exit(returncode)
 
 
 if __name__ == "__main__":
     main()
+
+# import time
+# import torch
+# import sys
+# import subprocess
+#
+# argslist = list(sys.argv)[1:]
+# num_gpus = torch.cuda.device_count()
+# argslist.append('--world-size={}'.format(num_gpus))
+# workers = []
+# job_id = time.strftime("%Y_%m_%d-%H%M%S")
+# # argslist.append("--group_name=group_{}".format(job_id))
+#
+# for i in range(num_gpus):
+#     argslist.append('--rank={}'.format(i))
+#     stdout = None if i == 0 else subprocess.DEVNULL
+#     # stdout = None if i == 0 else open("logs/{}_GPU_{}.log".format(job_id, i),
+#     #                                   "w")
+#     print(argslist)
+#     p = subprocess.Popen([str(sys.executable)]+argslist, stdout=stdout)
+#     workers.append(p)
+#     argslist = argslist[:-1]
+#
+# for p in workers:
+#     p.wait()

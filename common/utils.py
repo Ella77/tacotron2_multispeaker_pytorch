@@ -51,6 +51,7 @@ def load_filepaths_and_text(filename, split="|"):
                 raise Exception(
                     "incorrect line format for file: {}".format(filename))
             path = parts[0]
+            
             text = parts[1]
             speaker_id = int(parts[2])
 
