@@ -67,7 +67,7 @@ def parse_args(parser):
                         help='Model to train')
     parser.add_argument('--log-file', type=str, default='nvlog.json',
                         help='Filename for logging')
-    parser.add_argument('--phrase-path', type=str, default=None,
+    parser.add_argument('--phrase-path', type=str, default='./korean_phrase/korean.txt',
                         help='Path to phrase sequence file used for sample generation')
     parser.add_argument('--waveglow-checkpoint', type=str, default='output/waveglow_128000',
                         help='Path to pre-trained WaveGlow checkpoint for sample generation')

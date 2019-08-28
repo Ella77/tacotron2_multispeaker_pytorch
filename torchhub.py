@@ -95,8 +95,14 @@ print("speaker",embedded_speaker)
 
 
 t2.load_state_dict(state_dict)
-_ = t2.cuda().eval().half()
+_ = t2.cuda().eval()
 
+waveglow = torch.hub.load('nvidia/DeepLearningExamples:torchhub', 'nvidia_waveglow')
+waveglow = waveglow.remove_weightnorm(waveglow)
+waveglow = waveglow.to('cuda')
+waveglow.eval()
+
+'''
 waveglow = torch.load('output/waveglow_128000')['model']
 for m in waveglow.modules():
     if 'Conv' in str(type(m)):
@@ -108,6 +114,7 @@ print("load waveglow")
 # waveglow = waveglow.half()
 for k in waveglow.convinv:
     k.float()
+    '''
 # from apex import amp
 # waveglow, _ = amp.initialize(waveglow, [], opt_level="O3")
 
@@ -133,21 +140,24 @@ with torch.no_grad():
     # write('grifffv01_6_epoch26_진수.wav', 24000, audio)
 
 
-    audio = waveglow.infer(mel,sigma=0.6)
+    audio = waveglow.infer(mel)
     print((audio).min().item(),(audio).max().item())
+audio_numpy = audio[0].data.cpu().numpy()
+
+
 
 # audio = waveglow.infer(mel, sigma=sigma)
 # if denoiser_strength > 0:
 #     audio = denoiser(audio, denoiser_strength)
-audio = audio * 32768.0
-print((audio).min().item(),(audio).max().item())
-audio = audio.squeeze()
-audio = audio.cpu().numpy()
-audio = audio.astype('int16')
-# audio_path = os.path.join(
-#     output_dir, "{}_synthesis.wav".format(file_name))
-# write(audio_path, sampling_rate, audio)
-plt.imshow(mel.squeeze(0).detach().cpu().numpy())
+# audio = audio * 32768.0
+# print((audio).min().item(),(audio).max().item())
+# audio = audio.squeeze()
+# audio = audio.cpu().numpy()
+# audio = audio.astype('int16')
+# # audio_path = os.path.join(
+# #     output_dir, "{}_synthesis.wav".format(file_name))
+# # write(audio_path, sampling_rate, audio)
+# plt.imshow(mel.squeeze(0).detach().cpu().numpy())
 # audio_numpy = audio[0].data.cpu().numpy()
 # min = np.amin(audio_numpy)
 # max = np.amax(audio_numpy)
@@ -155,7 +165,7 @@ plt.imshow(mel.squeeze(0).detach().cpu().numpy())
 rate = 24000
 
 #
-write("fv01_epoch30_아.wav", rate, audio)
+write("torchhub.wav", rate, audio_numpy)
 #
 
 
