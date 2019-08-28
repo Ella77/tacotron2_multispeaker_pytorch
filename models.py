@@ -30,7 +30,7 @@ from os.path import abspath, dirname
 # enabling modules discovery from global entrypoint
 sys.path.append(abspath(dirname(__file__)+'/'))
 from tacotron2.model import Tacotron2
-from waveglow.model import WaveGlow
+from waveglow_temp.model import WaveGlow
 import torch
 
 
@@ -39,7 +39,7 @@ def parse_model_args(model_name, parser, add_help=False):
         from tacotron2.arg_parser import parse_tacotron2_args
         return parse_tacotron2_args(parser, add_help)
     if model_name == 'WaveGlow':
-        from waveglow.arg_parser import parse_waveglow_args
+        from waveglow_temp.arg_parser import parse_waveglow_args
         return parse_waveglow_args(parser, add_help)
     else:
         raise NotImplementedError(model_name)

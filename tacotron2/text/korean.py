@@ -1,4 +1,4 @@
-﻿# Code based on 
+# Code based on 
 
 import re
 import os
@@ -6,7 +6,7 @@ import ast
 import json
 from jamo import hangul_to_jamo, h2j, j2h
 
-from .ko_dictionary import english_dictionary, etc_dictionary
+from ko_dictionary import english_dictionary, etc_dictionary
 
 PAD = '_'
 EOS = '~'
@@ -191,12 +191,13 @@ def normalize_upper(text):
 
 def normalize_quote(text):
     def fn(found_text):
-        from nltk import sent_tokenize # NLTK doesn't along with multiprocessing
+        #from nltk import sent_tokenize # NLTK doesn't along with multiprocessing
 
         found_text = found_text.group()
         unquoted_text = found_text[1:-1]
 
-        sentences = sent_tokenize(unquoted_text)
+        #sentences = sent_tokenize(unquoted_text)
+        sentences = unquoted_text
         return " ".join(["'{}'".format(sent) for sent in sentences])
 
     return re.sub(quote_checker, fn, text)

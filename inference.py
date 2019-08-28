@@ -33,6 +33,7 @@ import numpy as np
 from scipy.io.wavfile import write
 
 import sys
+sys.path.append('./waveglow')
 
 import time
 from dllogger.logger import LOGGER
@@ -40,6 +41,7 @@ import dllogger.logger as dllg
 from dllogger.autologging import log_hardware, log_args
 
 from apex import amp
+import io
 
 def parse_args(parser):
     """
@@ -55,11 +57,11 @@ def parse_args(parser):
     parser.add_argument('--waveglow', type=str,
                         help='full path to the WaveGlow model checkpoint file')
     parser.add_argument('-s', '--sigma-infer', default=0.6, type=float)
-    parser.add_argument('-sr', '--sampling-rate', default=22050, type=int,
+    parser.add_argument('-sr', '--sampling-rate', default=24000, type=int,
                         help='Sampling rate')
     parser.add_argument('--amp-run', action='store_true',
                         help='inference with AMP')
-    parser.add_argument('--log-file', type=str, default='nvlog.json',
+    parser.add_argument('--log-file', type=str, default='nvloginfer.json',
                         help='Filename for logging')
     parser.add_argument('--include-warmup', action='store_true',
                         help='Include warmup')
@@ -156,7 +158,8 @@ def prepare_input_sequence(texts):
     d = []
     for i,text in enumerate(texts):
         d.append(torch.IntTensor(
-            text_to_sequence(text, ['english_cleaners'])[:]))
+            text_to_sequence(text, ['korean_cleaners'])[:]))
+    print("Text to infer",d)
 
     text_padded, input_lengths = pad_sequences(d)
     if torch.cuda.is_available():
@@ -211,12 +214,23 @@ def main():
 
     tacotron2 = load_and_setup_model('Tacotron2', parser, args.tacotron2,
                                      args.amp_run)
-    waveglow = load_and_setup_model('WaveGlow', parser, args.waveglow,
-                                    args.amp_run)
+    
+    waveglow = torch.load('output/waveglow_128000')['model']
+    for m in waveglow.modules():
+        if 'Conv' in str(type(m)):
+            setattr(m, 'padding_mode', 'zeros')
+    
+    waveglow = waveglow.remove_weightnorm(waveglow)
+    waveglow.cuda().eval()
+    
+    from apex import amp
+    waveglow, _ = amp.initialize(waveglow, [], opt_level="O3")
+
+
 
     texts = []
     try:
-        f = open(args.input, 'r')
+        f = io.open(args.input, 'r',encoding='utf-8-sig')
         texts = f.readlines()
     except:
         print("Could not read file")
