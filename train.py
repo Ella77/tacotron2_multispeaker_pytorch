@@ -67,9 +67,9 @@ def parse_args(parser):
                         help='Model to train')
     parser.add_argument('--log-file', type=str, default='nvlog.json',
                         help='Filename for logging')
-    parser.add_argument('--phrase-path', type=str, default=None,
+    parser.add_argument('--phrase-path', type=str, default='./korean_phrase/korean.txt',
                         help='Path to phrase sequence file used for sample generation')
-    parser.add_argument('--waveglow-checkpoint', type=str, default=None,
+    parser.add_argument('--waveglow-checkpoint', type=str, default='output/waveglow_128000',
                         help='Path to pre-trained WaveGlow checkpoint for sample generation')
     parser.add_argument('--tacotron2-checkpoint', type=str, default=None,
                         help='Path to pre-trained Tacotron2 checkpoint for sample generation')
@@ -86,7 +86,7 @@ def parse_args(parser):
     training = parser.add_argument_group('training setup')
     training.add_argument('--epochs', type=int, required=True,
                           help='Number of total epochs to run')
-    training.add_argument('--epochs-per-checkpoint', type=int, default=25,
+    training.add_argument('--epochs-per-checkpoint', type=int, default=2,
                           help='Number of epochs per checkpoint')
     training.add_argument('--seed', type=int, default=1234,
                           help='Seed for PyTorch random number generators')

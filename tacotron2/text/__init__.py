@@ -6,7 +6,7 @@ import os
 # from hparams import hparams
 # from .symbols import symbols, en_symbols, PAD, EOS
 # from .korean import jamo_to_korean
-print("text_init",os.getcwd())
+#print("text_init",os.getcwd())
 import sys
 sys.path.append('/home/ubuntu/xvdf1/tacotron2_markornot/tacotron2_multispeaker_pytorch/tacotron2')
 from text import cleaners
@@ -135,3 +135,5 @@ def _arpabet_to_sequence(text):
 
 def _should_keep_symbol(s):
     return s in _symbol_to_id and s is not '_' and s is not '~'
+
+#print(sequence_to_text(text_to_sequence('안녕하세요 3 + JTBC tv보러 온 1번선수','korean_cleaners'),False,False))
